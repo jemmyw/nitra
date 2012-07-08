@@ -20,12 +20,16 @@ class Nitra::Client
       end
     end
 
-    puts progress.output.gsub(/\n\n\n+/, "\n\n")
+    if progress
+      puts progress.output.gsub(/\n\n\n+/, "\n\n")
 
-    puts "\n#{progress.files_completed}/#{progress.file_count} files processed, #{progress.example_count} examples, #{progress.failure_count} failures"
-    puts "#{$aborted ? "Aborted after" : "Finished in"} #{"%0.1f" % (Time.now-start_time)} seconds" unless configuration.quiet
+      puts "\n#{progress.files_completed}/#{progress.file_count} files processed, #{progress.example_count} examples, #{progress.failure_count} failures"
+      puts "#{$aborted ? "Aborted after" : "Finished in"} #{"%0.1f" % (Time.now-start_time)} seconds" unless configuration.quiet
 
-    !$aborted && progress.files_completed == progress.file_count && progress.failure_count.zero?
+      !$aborted && progress.files_completed == progress.file_count && progress.failure_count.zero?
+    else
+      false
+    end
   end
 
   protected

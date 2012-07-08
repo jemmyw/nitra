@@ -3,12 +3,13 @@ require 'tempfile'
 
 class Nitra::Worker
   attr_reader :runner_id, :worker_number, :configuration, :channel, :io, :framework
+  attr_reader :pid, :pipe
 
-  def initialize(runner_id, worker_number, configuration)
+  def initialize(runner_id, worker_number, configuration, framework)
     @runner_id = runner_id
     @worker_number = worker_number
     @configuration = configuration
-    @framework = configuration.framework_shim
+    @framework = framework
     @forked_worker_pid = nil
 
     ENV["TEST_ENV_NUMBER"] = (worker_number + 1).to_s
@@ -36,7 +37,23 @@ class Nitra::Worker
 
     client.close
 
+    @pid = pid
+    @pipe = server
+
     [pid, server]
+  end
+
+  def kill
+    Process.kill('USR1', pid) if running?
+    @pid = nil
+  end
+
+  def close
+    @pipe = nil
+  end
+
+  def running?
+    pid && pipe
   end
 
   protected
@@ -52,7 +69,7 @@ class Nitra::Worker
     # Loop until our runner passes us a message from the master to tells us we're finished.
     loop do
       debug "Announcing availability"
-      channel.write("command" => "ready")
+      channel.write("command" => "ready", "framework" => framework.name)
 
       debug "Waiting for next job"
       data = channel.read
@@ -70,19 +87,25 @@ class Nitra::Worker
   end
 
   def preload_framework
-    debug "running empty spec/feature to make framework run its initialisation"
-    file = Tempfile.new("nitra")
     begin
-      file.write(@framework.minimal_file)
+    debug "loading #{framework.name}"
+    framework.load_environment
+
+    debug "running empty spec/feature to make framework #{framework.name} run its initialisation"
+    file = Tempfile.new("nitra")
+      file.write(framework.minimal_file)
       file.close
       output = Nitra::Utils.capture_output do
         run_file(file.path, true)
       end
       channel.write("command" => "stdout", "process" => "init framework", "text" => output) unless output.empty?
+    rescue => e
+      debug "oh no: #{e.to_s}"
+      exit
     ensure
       file.close unless file.closed?
       file.unlink
-      if configuration.framework == :cucumber
+      if framework.name == "cucumber"
         @cuke_runtime.reset
       else
         RSpec.reset
@@ -146,7 +169,7 @@ class Nitra::Worker
   end
 
   def run_file(filename, preload = false)
-    if configuration.framework == :cucumber
+    if framework.name == "cucumber"
       run_cucumber_file(filename, preload)
     else
       run_rspec_file(filename, preload)
@@ -192,6 +215,7 @@ class Nitra::Worker
     if preloading
       puts(io.string)
     else
+      puts "ran #{filename}, #{io.string}"
       channel.write("command" => "result", "filename" => filename, "return_code" => result.to_i, "text" => io.string)
     end
   end

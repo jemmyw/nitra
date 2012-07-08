@@ -1,15 +1,18 @@
 class Nitra::Master
-  attr_reader :configuration, :files, :framework
+  attr_reader :configuration, :files, :default_framework
 
   def initialize(configuration, files = nil)
     @configuration = configuration
-    @framework = configuration.framework_shim
-    @files = files
+    @files = files || []
   end
 
   def run
-    @files = framework.files if files.nil? || files.empty?
+    configuration.frameworks.each do |framework|
+      @files += Nitra::FrameworkShims::SHIMS[framework].files
+    end
     return if files.empty?
+    @files = @files.sort_by{|f| File.size(f)}.reverse.sort_by{|f| Nitra::FrameworkShims.shim_for_file(f).order }
+    configuration.default_framework = Nitra::FrameworkShims.shim_for_file(files.first).name
 
     progress = Nitra::Progress.new
     progress.file_count = @files.length
@@ -36,6 +39,8 @@ class Nitra::Master
           case data["command"]
           when "next"
             channel.write "filename" => files.shift
+          when "previous"
+            files.unshift data["filename"]
           when "result"
             progress.files_completed += 1
             progress.example_count += data["example_count"] || 0

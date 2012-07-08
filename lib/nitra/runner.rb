@@ -1,14 +1,15 @@
 require 'stringio'
 
 class Nitra::Runner
-  attr_reader :configuration, :server_channel, :runner_id, :framework, :worker_pids
+  attr_reader :configuration, :server_channel, :runner_id, :framework
+  attr_reader :workers
 
   def initialize(configuration, server_channel, runner_id)
     @configuration = configuration
     @server_channel = server_channel
     @runner_id = runner_id
-    @framework = configuration.framework_shim
-    @worker_pids = []
+    @framework = configuration.default_framework_shim
+    @workers = []
 
     configuration.calculate_default_process_count
     server_channel.raise_epipe_on_write_error = true
@@ -21,12 +22,12 @@ class Nitra::Runner
 
     load_rails_environment
 
-    pipes = start_workers
+    start_workers
 
     trap("SIGTERM") { $aborted = true }
     trap("SIGINT") { $aborted = true }
 
-    hand_out_files_to_workers(pipes)
+    hand_out_files_to_workers
   rescue Errno::EPIPE
   ensure
     trap("SIGTERM", "DEFAULT")
@@ -60,7 +61,8 @@ class Nitra::Runner
     ENV["TEST_ENV_NUMBER"] = "1"
 
     output = Nitra::Utils.capture_output do
-      framework.load_environment
+      require './config/application'
+      Rails.application.require_environment!
     end
 
     server_channel.write("command" => "stdout", "process" => "rails initialisation", "text" => output)
@@ -70,22 +72,33 @@ class Nitra::Runner
 
   def start_workers
     (0...configuration.process_count).collect do |index|
-      pid, pipe = Nitra::Worker.new(runner_id, index, configuration).fork_and_run
-      worker_pids << pid
-      pipe
+      start_worker(index, framework)
     end
   end
 
-  def hand_out_files_to_workers(pipes)
-    while !$aborted && pipes.length > 0
-      Nitra::Channel.read_select(pipes + [server_channel]).each do |worker_channel|
+  def start_worker(index, framework)
+    worker = Nitra::Worker.new(runner_id, index, configuration, framework)
+    worker.fork_and_run
+    workers << worker
+  end
 
+  def running_workers
+    workers.select(&:running?)
+  end
+
+  def pipes
+    workers.select(&:running?).map(&:pipe) + [server_channel]
+  end
+
+  def hand_out_files_to_workers
+    while !$aborted && running_workers.any?
+      Nitra::Channel.read_select(pipes).each do |worker_channel|
         # This is our back-channel that lets us know in case the master is dead.
         kill_workers if worker_channel == server_channel && server_channel.rd.eof?
 
         unless data = worker_channel.read
-          pipes.delete worker_channel
           debug "Worker #{worker_channel} unexpectedly died."
+          running_workers.detect{|w|w.pipe == worker_channel}.close
           next
         end
 
@@ -123,12 +136,23 @@ class Nitra::Runner
           next_file = server_channel.read.fetch("filename")
 
           if next_file
-            debug "Sending #{next_file} to channel #{worker_channel}"
-            worker_channel.write "command" => "process", "filename" => next_file
+            shim = Nitra::FrameworkShims.shim_for_file(next_file)
+
+            if data["framework"] == shim.name
+              debug "Sending #{next_file} to channel #{worker_channel}"
+              worker_channel.write "command" => "process", "filename" => next_file
+            else
+              debug "Wrong framework for #{next_file}, closing worker and creating for #{shim.name}"
+              server_channel.write("command" => "previous", "filename" => next_file)
+              worker_channel.write("command" => "close")
+              worker = running_workers.detect{|w|w.pipe == worker_channel}
+              worker.close
+              start_worker(worker.worker_number, shim)
+            end
           else
             debug "Sending close message to channel #{worker_channel}"
             worker_channel.write "command" => "close"
-            pipes.delete worker_channel
+            running_workers.detect{|w|w.pipe == worker_channel}.close
           end
         end
       end
@@ -145,7 +169,7 @@ class Nitra::Runner
   # Kill the workers.
   #
   def kill_workers
-    worker_pids.each {|pid| Process.kill('USR1', pid)}
+    workers.each(&:kill)
     Process.waitall
     exit
   end
