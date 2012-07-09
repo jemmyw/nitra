@@ -18,9 +18,9 @@ class Nitra::Runner
   def run
     ENV["RAILS_ENV"] = configuration.environment
 
-    load_rails_environment
-    
     initialise_database
+
+    load_rails_environment
 
     start_workers
 
