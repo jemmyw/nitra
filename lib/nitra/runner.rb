@@ -18,9 +18,9 @@ class Nitra::Runner
   def run
     ENV["RAILS_ENV"] = configuration.environment
 
-    initialise_database
-
     load_rails_environment
+    
+    initialise_database
 
     start_workers
 
@@ -36,22 +36,82 @@ class Nitra::Runner
 
   protected
   def initialise_database
+    if configuration.load_schema || configuration.migrate
+      require 'rake'
+      Rake.load_rakefile("Rakefile") 
+    end
+
     if configuration.load_schema
-      configuration.process_count.times do |index|
+      pids, ios = configuration.process_count.times.to_a.map do |index|
         debug "initialising database #{index+1}..."
-        ENV["TEST_ENV_NUMBER"] = (index + 1).to_s
-        output = `bundle exec rake db:drop db:create db:schema:load 2>&1`
-        server_channel.write("command" => "stdout", "process" => "db:schema:load", "text" => output)
+        rd, wr = IO.pipe
+
+        pid = fork do
+          $stdout.reopen(wr)
+          $stderr.reopen(wr)
+          rd.close
+
+          ENV["TEST_ENV_NUMBER"] = (index + 1).to_s
+
+          Rake::Task["db:drop"].invoke
+          Rake::Task["db:create"].invoke
+          Rake::Task["db:schema:load"].invoke
+
+          wr.close
+          exit!
+        end
+
+        wr.close
+        [pid, rd]
+      end.transpose
+
+      output = ""
+      loop do
+        rios, _ = IO.select(ios)
+        break if rios.nil? || rios.empty?
+        text = rios.map(&:read).join
+        break if text.nil? || text.length.zero?
+        output << text
       end
+      ios.each(&:close)
+
+      pids.each{|pid| Process.waitpid(pid) }
+      server_channel.write("command" => "stdout", "process" => "db:schema:load", "text" => output)
     end
 
     if configuration.migrate
-      configuration.process_count.times do |index|
+      pids, ios = configuration.process_count.times.to_a.map do |index|
         debug "migrating database #{index+1}..."
-        ENV["TEST_ENV_NUMBER"] = (index + 1).to_s
-        output = `bundle exec rake db:migrate 2>&1`
-        server_channel.write("command" => "stdout", "process" => "db:migrate", "text" => output)
+        rd, wr = IO.pipe
+
+        pid = fork do
+          $stdout.reopen(wr)
+          $stderr.reopen(wr)
+          rd.close
+           
+          ENV["TEST_ENV_NUMBER"] = (index + 1).to_s
+          Rake::Task["db:migrate"].invoke
+
+          wr.close
+          exit!
+        end
+
+        wr.close
+        [pid, rd]
+      end.transpose
+
+      output = ""
+      loop do
+        rios, _ = IO.select(ios)
+        break if rios.nil? || rios.empty?
+        text = rios.map(&:read).join
+        break if text.nil? || text.length.zero?
+        output << text
       end
+      ios.each(&:close)
+
+      pids.each{|pid| Process.waitpid(pid) }
+      server_channel.write("command" => "stdout", "process" => "db:schema:load", "text" => output)
     end
   end
 

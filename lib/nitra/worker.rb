@@ -87,12 +87,12 @@ class Nitra::Worker
   end
 
   def preload_framework
-    begin
     debug "loading #{framework.name}"
     framework.load_environment
 
     debug "running empty spec/feature to make framework #{framework.name} run its initialisation"
     file = Tempfile.new("nitra")
+    begin
       file.write(framework.minimal_file)
       file.close
       output = Nitra::Utils.capture_output do
