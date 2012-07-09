@@ -35,7 +35,11 @@ class Nitra::Channel
       data = rd.read(result[1].to_i)
       YAML.load(data)
     else
-      raise ProtocolInvalidError, "Expected nitra length line, got #{line.inspect}"
+      rest = line
+      while line = rd.gets
+        rest << "\n#{line}"
+      end
+      raise ProtocolInvalidError, "Expected nitra length line, got #{rest}"
     end
   end
 
