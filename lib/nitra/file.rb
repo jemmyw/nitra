@@ -14,12 +14,8 @@ class Nitra::File
   def <=>(other)
     if framework != other
       framework_shim.order <=> other.framework_shim.order
-    elsif last_run_time.nil? && other.last_run_time.nil?
+    elsif last_run_time.nil? || other.last_run_time.nil?
       other.size <=> size
-    elsif last_run_time.nil?
-      1
-    elsif other.last_run_time.nil?
-      -1
     else
       other.last_run_time <=> last_run_time
     end
