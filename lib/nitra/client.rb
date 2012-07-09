@@ -36,11 +36,12 @@ class Nitra::Client
   def print_progress(progress)
     return if configuration.quiet
 
-    bar_length = @columns - 50
     progress_factor = progress.files_completed / progress.file_count.to_f
+    progress_info = "#{progress.files_completed}/#{progress.file_count} (#{"%0.1f%%" % (progress_factor*100)}) * #{progress.example_count} examples, #{progress.failure_count} failures"
+    bar_length = @columns - (progress_info.length + 48)
     length_completed = (progress_factor * bar_length).to_i
     length_to_go = bar_length - length_completed
-    print "\r[#{"X" * length_completed}#{"." * length_to_go}] #{progress.files_completed}/#{progress.file_count} (#{"%0.1f%%" % (progress_factor*100)}) * #{progress.example_count} examples, #{progress.failure_count} failures\r"
+    print "\r[#{"X" * length_completed}#{"." * length_to_go}] #{progress_info}\r"
     puts if configuration.debug
     $stdout.flush
   end
