@@ -52,7 +52,7 @@ class Nitra::Runner
     return unless File.file?('config/application.rb')
     server_channel.write("command" => "starting", "framework" => "rails", "on" => runner_id)
 
-    ENV["TEST_ENV_NUMBER"] = "1"
+    ENV["TEST_ENV_NUMBER"] = ""
 
     output = Nitra::Utils.capture_output do
       require './config/application'

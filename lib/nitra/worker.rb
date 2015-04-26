@@ -35,7 +35,7 @@ module Nitra
         @configuration = configuration
         @forked_worker_pid = nil
 
-        ENV["TEST_ENV_NUMBER"] = worker_number.to_s
+        ENV["TEST_ENV_NUMBER"] = worker_number == 1 ? "" : worker_number.to_s
 
         # Frameworks don't like it when you change the IO between invocations.
         # So we make one object and flush it after every invocation.

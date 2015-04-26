@@ -15,7 +15,7 @@ class Nitra::Tasks
     rd, wr = IO.pipe
     (1..count).collect do |index|
       fork do
-        ENV["TEST_ENV_NUMBER"] = index.to_s
+        ENV["TEST_ENV_NUMBER"] = index == 1 ? "" : index.to_s
         rd.close
         $stdout.reopen(wr)
         $stderr.reopen(wr)
